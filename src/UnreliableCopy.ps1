@@ -53,6 +53,18 @@ function PrintTree {
         PrintTree -tree $tree.Parent
     }
 }
+function EnsureSameSource {
+    $srcPathFilePath = "$tmp\src.txt"
+    if (Test-Path $srcPathFilePath -PathType Leaf) {
+        $lastSrc = Get-Content -Path $srcPathFilePath -Raw -Encoding UTF8
+        if ($lastSrc -ne $srcRoot) {
+            throw "There is a copy in progress from a different source path '$lastSrc'." +
+            " You can manually delete '$tmp' to start fresh.";
+        }
+    }
+
+    Set-Content -Path $srcPathFilePath -Value $srcRoot -NoNewline -Encoding UTF8
+}
 
 function HydrateCursor {
     param(
@@ -73,14 +85,14 @@ function HydrateCursor {
         $leafIndex = $levels[$levels.Length - 1]
     
         $parentLevelsString = $parentLevels -join "."
-        $plan = Get-Content -Path "$tmp\$parentLevelsString.txt"
+        $plan = Get-Content -Path "$tmp\$parentLevelsString.txt" -Encoding UTF8
         $nextItem = $plan[$leafIndex]
     
         If ($nextItem) {
             if (Test-Path $nextItem -PathType Container) {
                 Write-Host "Expanding into '$nextItem'..."
                 $expandedItems = GetItems -Path $nextItem
-                Set-Content -Path "$tmp\$cursor.txt" -Value $expandedItems
+                Set-Content -Path "$tmp\$cursor.txt" -Value $expandedItems -Encoding UTF8
                 $cursor = "$cursor.0"
             }
         }
@@ -89,7 +101,7 @@ function HydrateCursor {
         Write-Host "No cursor found, starting fresh"
     
         $items = GetItems -Path $src
-        Set-Content -Path "$tmp\0.txt" -Value $items
+        Set-Content -Path "$tmp\0.txt" -Value $items -Encoding UTF8
         $cursor = "0.0"
         Set-Content -Path $cursorPath -Value $cursor -NoNewline
     }
@@ -103,16 +115,19 @@ New-Item -Path $tmp -ItemType Directory -Force | Out-Null
 $srcRoot = (Get-Item $src).FullName
 $destRoot = (Get-Item $dest).FullName
 
+EnsureSameSource
+
 $fullExcludes = $exclude | ForEach-Object {
-    (Get-Item $_).FullName
+    $item = Get-Item $_
+    Write-Output @{
+        FullName    = $item.FullName;
+        IsDirectory = $item.PSIsContainer
+    }
 }
-$robocopyExclusions = ($fullExcludes | ForEach-Object {
-        "/XD ""$_"""
-    }) -join " "
 
 $excludesDict = @{}
 $fullExcludes | ForEach-Object {
-    $excludesDict.Add($_, $true)
+    $excludesDict.Add($_.FullName, $true)
 }
 
 Write-Host "Copying '$src' to '$dest'"
@@ -136,7 +151,7 @@ for ($i = 0; $i -lt $parentLevels.Length; $i++) {
     $level += "$index"
     $tree = @{
         Level  = $level;
-        Items  = Get-Content -Path "$tmp\$level.txt";
+        Items  = Get-Content -Path "$tmp\$level.txt" -Encoding UTF8;
         Parent = $tree
     }
 }
@@ -158,15 +173,25 @@ while ($tree) {
                 If (Test-Path $item -PathType Leaf) {
                     Write-Host "Copying file '$item' to '$destItem'..."
 
-                    # Make sure destination path strucure exists...
+                    # Make sure destination path structure exists...
                     New-Item -ItemType File -Path $destItem -Force | Out-Null
                     Copy-Item $item $destItem | Out-Null
                 }
                 else {
-                    $afterRoot = $item.Substring($srcRoot.Length)
-                    $destItem = $destRoot + $afterRoot
-                    Write-Host "robocopy ""$item"" ""$destItem"" ""/MT:4"" $robocopyExclusions"
-                    robocopy $item $destItem "/MT:4" $robocopyExclusions
+                    $argList = @(
+                        $item,
+                        $destItem,
+                        "/MT:4",
+                        "/NJH", # No Job Header.
+                        "/NJS"  # No Job Summary.
+                    )
+                    $fullExcludes | ForEach-Object {
+                        $argList += If ($_.IsDirectory) { "/XD" } else { "/XF" }
+                        $argList += $_.FullName
+                    }
+
+                    Write-Host "robocopy $argList"
+                    & robocopy $argList
                     $err = $LastExitCode
                     if ($err -gt 7) {
                         throw "Robocopy failed with $err"
