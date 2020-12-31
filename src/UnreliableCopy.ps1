@@ -78,6 +78,9 @@ function HydrateCursor {
     
     if ($cursor) {
         Write-Host "Found cursor '$cursor'"
+        if ($cursor -eq "done") {
+            return "done"
+        }
     
         # Try to expand next level
         $levels = $cursor -split "\."
@@ -85,7 +88,7 @@ function HydrateCursor {
         $leafIndex = $levels[$levels.Length - 1]
     
         $parentLevelsString = $parentLevels -join "."
-        $plan = Get-Content -Path "$tmp\$parentLevelsString.txt" -Encoding UTF8
+        $plan = @(Get-Content -Path "$tmp\$parentLevelsString.txt" -Encoding UTF8)
         $nextItem = $plan[$leafIndex]
     
         If ($nextItem) {
@@ -134,6 +137,10 @@ Write-Host "Copying '$src' to '$dest'"
 
 $cursorPath = "$tmp\cursor.txt"
 $cursor = HydrateCursor -cursorPath $cursorPath
+if ($cursor -eq "done") {
+    Write-Host "Copying already completed on a previous run. To start a new copy, you can manually delete '$tmp'."
+    exit 0
+}
 
 Write-Host "Copying starting at cursor '$cursor'"
 
@@ -151,7 +158,7 @@ for ($i = 0; $i -lt $parentLevels.Length; $i++) {
     $level += "$index"
     $tree = @{
         Level  = $level;
-        Items  = Get-Content -Path "$tmp\$level.txt" -Encoding UTF8;
+        Items  = @(Get-Content -Path "$tmp\$level.txt" -Encoding UTF8);
         Parent = $tree
     }
 }
@@ -208,15 +215,23 @@ while ($tree) {
         }
     }
 
+    $treeToDelete = $tree.Level
     $levels = $tree.Level -split "\."
     $leafIndex = [convert]::ToInt32($levels[$levels.Length - 1]) + 1
     $tree = $tree.Parent
 
+    # Delete the file containing the contents of the tree level we just finished copying
+    Remove-Item -Path "$tmp\$treeToDelete.txt" -Force | Out-Null
+
     if ($tree) {
         $cursor = "$($tree.Level).$leafIndex"
-        Write-Host "Updating cursor to '$cursor'..."
-        Set-Content -Path $cursorPath -Value $cursor -NoNewline
     }
+    else {
+        $cursor = "done"
+    }
+
+    Write-Host "Updating cursor to '$cursor'..."
+    Set-Content -Path $cursorPath -Value $cursor -NoNewline
 }
 
 Write-Host "Done!"
