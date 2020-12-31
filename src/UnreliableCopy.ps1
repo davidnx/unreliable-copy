@@ -220,9 +220,6 @@ while ($tree) {
     $leafIndex = [convert]::ToInt32($levels[$levels.Length - 1]) + 1
     $tree = $tree.Parent
 
-    # Delete the file containing the contents of the tree level we just finished copying
-    Remove-Item -Path "$tmp\$treeToDelete.txt" -Force | Out-Null
-
     if ($tree) {
         $cursor = "$($tree.Level).$leafIndex"
     }
@@ -232,6 +229,9 @@ while ($tree) {
 
     Write-Host "Updating cursor to '$cursor'..."
     Set-Content -Path $cursorPath -Value $cursor -NoNewline
+
+    # Delete the file containing the contents of the tree level we just finished copying
+    Remove-Item -Path "$tmp\$treeToDelete.txt" -Force | Out-Null
 }
 
 Write-Host "Done!"
