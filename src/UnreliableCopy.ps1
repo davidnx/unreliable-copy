@@ -120,6 +120,9 @@ $destRoot = (Get-Item $dest).FullName
 
 EnsureSameSource
 
+if ($null -eq $exclude) {
+    $exclude = @()
+}
 $fullExcludes = $exclude | ForEach-Object {
     $item = Get-Item $_
     Write-Output @{
@@ -188,6 +191,7 @@ while ($tree) {
                     $argList = @(
                         $item,
                         $destItem,
+                        "/e",
                         "/MT:4",
                         "/NJH", # No Job Header.
                         "/NJS"  # No Job Summary.
